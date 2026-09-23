@@ -1,0 +1,52 @@
+# NVO on Linux
+
+The `nvo_linux_patcher.sh` script patches the New Vegas Online (NVO) launcher to work on Linux via Wine.
+
+> [!CAUTION]
+> Proceed at your own risk.
+
+## Requirements
+
+- Linux with Wine.
+- A 64-bit (win64) Wine prefix.
+- `curl` or `wget`, `unzip`, `base64`, and `file`.
+- A Fallout New Vegas installation (patched with [FNV4GB for Linux](https://www.nexusmods.com/newvegas/mods/62552?tab=files)).
+  
+`winetricks` is used if present but is optional (7-Zip is downloaded otherwise).
+
+## Usage
+
+1. Clone the repository and make the script executable:
+   
+```bash
+git clone https://github.com/LuMarans30/nvo_linux_patcher.git
+cd nvo_linux_patcher
+chmod +x nvo_linux_patcher.sh
+```
+
+If you'd rather not clone, the script is self-contained:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/LuMarans30/nvo_linux_patcher/main/nvo_linux_patcher.sh
+chmod +x nvo_linux_patcher.sh
+```
+
+2. Run the script with your Wine prefix (it automatically finds the game):
+   
+```bash
+./nvo_linux_patcher.sh --prefix "/path/to/wineprefix"
+# or
+WINEPREFIX="/path/to/wineprefix" ./nvo_linux_patcher.sh
+```
+You can also `cd` into the game folder and run `/path/to/nvo_linux_patcher.sh` (the wine prefix will be automatically detected). Copying the script into the game folder is not required.
+
+3. Start the launcher:
+   
+```bash
+WINEPREFIX="/path/to/wineprefix" wine "/path/to/Fallout New Vegas/NVOLauncher2.exe"
+```
+
+> [!IMPORTANT]
+> The `tar.exe` shim binary is already embedded as base64 inside `nvo_linux_patcher.sh`, so manual compilation is not required.
+
+In case you prefer compiling `nvo_tar_shim.c` from source yourself, you can use the `build_shim.sh` script, which both compiles the C file and embeds the binary in `nvo_linux_patcher.sh`.
