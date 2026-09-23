@@ -35,6 +35,9 @@ jobs:
           ./build_shim.sh
           bash -n nvo_linux_patcher.sh
 
+      - name: Smoke test the patcher
+        run: ./nvo_linux_patcher.sh --help >/dev/null
+
       - name: Commit and push the updated patcher
         run: |
           git config user.name  'github-actions[bot]'
