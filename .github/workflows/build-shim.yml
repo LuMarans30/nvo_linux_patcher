@@ -1,0 +1,48 @@
+name: Auto-Build and Embed Shim
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - nvo_tar_shim.c
+      - kernel32.def
+      - build_shim.sh
+      - .github/workflows/build-shim.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-shim-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-embed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LLVM/Clang toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang lld llvm mingw-w64 file
+
+      - name: Rebuild and re-embed the shim
+        run: |
+          chmod +x build_shim.sh
+          ./build_shim.sh
+          bash -n nvo_linux_patcher.sh
+
+      - name: Commit and push the updated patcher
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add nvo_linux_patcher.sh
+          if git diff --staged --quiet; then
+            echo "shim unchanged; nothing to commit"
+            exit 0
+          fi
+          git commit -m "chore: auto-rebuild tar.exe shim base64 blob [skip ci]"
+          git push
