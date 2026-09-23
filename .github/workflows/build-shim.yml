@@ -47,5 +47,5 @@ jobs:
             echo "shim unchanged; nothing to commit"
             exit 0
           fi
-          git commit -m "chore: auto-rebuild tar.exe shim base64 blob [skip ci]"
+          git commit -m "chore: auto-rebuild tar.exe shim base64 blob [skip ci] $(git log -1 --format=%h -- nvo_tar_shim.c)"
           git push
