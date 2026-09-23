@@ -1,0 +1,8 @@
+# Manual build artifacts (build_shim.sh itself builds in a temp dir)
+*.obj
+*.exe
+*.lib
+
+# Runtime output, if the patcher is run inside the repo
+*.log
+nvo-linux-backup/
