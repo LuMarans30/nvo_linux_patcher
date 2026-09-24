@@ -7,13 +7,14 @@ The `nvo_linux_patcher.sh` script patches the New Vegas Online (NVO) launcher to
 
 ## Requirements
 
-- Wine 
-  - the script needs it to execute registry edits and run 7-Zip inside the prefix
+- Wine
+  - the script uses it to execute registry edits and run 7-Zip inside the prefix
+  - optional for Steam/Proton installs, where `protontricks` is used instead when Wine isn't installed
 - A 64-bit (win64) Wine prefix
 - `curl` or `wget`, `unzip`, `base64`, and `file`.
 - A Fallout New Vegas installation (patched with [FNV4GB for Linux](https://www.nexusmods.com/newvegas/mods/62552?tab=files)).
   
-`winetricks` is used if present but is optional (7-Zip is downloaded otherwise).
+`winetricks` (or `protontricks` for Steam/Proton installs) is used if present but is optional (7-Zip is downloaded otherwise).
 
 ## Usage
 
@@ -63,6 +64,15 @@ It looks for `steamapps/common/Fallout New Vegas` and the matching Proton prefix
   --game-dir "$HOME/.local/share/Steam/steamapps/common/Fallout New Vegas" \
   --prefix   "$HOME/.local/share/Steam/steamapps/compatdata/22380/pfx"
 ```
+
+Launch the game with Proton (not Wine):
+
+```bash
+protontricks-launch --appid 22380 "$HOME/.local/share/Steam/steamapps/common/Fallout New Vegas/NVOLauncher2.exe"
+```
+
+If you don't have `protontricks`, add `NVOLauncher2.exe` as a non-Steam game and
+launch it with the same Proton version as Fallout: New Vegas.
 
 > [!NOTE]
 > Your Proton prefix is modified in place. Back it up first if you want.
