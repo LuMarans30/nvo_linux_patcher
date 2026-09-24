@@ -7,8 +7,9 @@ The `nvo_linux_patcher.sh` script patches the New Vegas Online (NVO) launcher to
 
 ## Requirements
 
-- Linux with Wine.
-- A 64-bit (win64) Wine prefix.
+- Wine 
+  - the script needs it to execute registry edits and run 7-Zip inside the prefix
+- A 64-bit (win64) Wine prefix
 - `curl` or `wget`, `unzip`, `base64`, and `file`.
 - A Fallout New Vegas installation (patched with [FNV4GB for Linux](https://www.nexusmods.com/newvegas/mods/62552?tab=files)).
   
@@ -45,6 +46,32 @@ You can also `cd` into the game folder and run `/path/to/nvo_linux_patcher.sh` (
 ```bash
 WINEPREFIX="/path/to/wineprefix" wine "/path/to/Fallout New Vegas/NVOLauncher2.exe"
 ```
+
+### Steam / Proton
+
+Steam installs keep the game outside the prefix, so the script detects them automatically by reading your Steam libraries (native, Flatpak, and Snap roots, plus extra libraries from `libraryfolders.vdf`):
+
+```bash
+./nvo_linux_patcher.sh
+```
+
+It looks for `steamapps/common/Fallout New Vegas` and the matching Proton prefix
+`steamapps/compatdata/22380/pfx`. If your setup lives elsewhere, pass both paths explicitly:
+
+```bash
+./nvo_linux_patcher.sh \
+  --game-dir "$HOME/.local/share/Steam/steamapps/common/Fallout New Vegas" \
+  --prefix   "$HOME/.local/share/Steam/steamapps/compatdata/22380/pfx"
+```
+
+> [!NOTE]
+> Your Proton prefix is modified in place. Back it up first if you want.
+
+> [!WARNING]
+> Steam's "Verify integrity of game files" feature restores any Steam-managed files the patch overwrote (e.g. `FalloutNV.exe`).
+> If you verify, re-apply the FNV4GB patch first, then re-run this script
+
+## Build from source
 
 > [!IMPORTANT]
 > The `tar.exe` shim binary is already embedded as base64 inside `nvo_linux_patcher.sh`, so manual compilation is not required.

@@ -16,12 +16,14 @@
 #  It also checks that FalloutNV.exe is 4GB/LAA patched, and points you at the
 #  Nexus "FNV4GB for Linux" patch if it isn't.
 #
-#  Usage:  run it with the Wine prefix to patch (found by walking up from
-#          the current directory); the game folder is found in that prefix:
+#  Usage:  normally needs no arguments since the Wine/Proton prefix and the game
+#          folder are detected automatically (enclosing prefix, then Steam):
 #     chmod +x nvo_linux_patcher.sh
 #     ./nvo_linux_patcher.sh
 #     WINEPREFIX=~/Games/fallout ./nvo_linux_patcher.sh   # or --prefix; else prompts
 #     ./nvo_linux_patcher.sh --game-dir "/path/to/Fallout New Vegas"
+#     ./nvo_linux_patcher.sh --prefix "$HOME/.local/share/Steam/steamapps/compatdata/22380/pfx" \
+#                            --game-dir "$HOME/.local/share/Steam/steamapps/common/Fallout New Vegas"
 #     ./nvo_linux_patcher.sh --no-content                 # skip the ~660 MB pack
 #
 #  Requires: wine, curl (or wget), unzip, base64.  A 64-bit ("win64") prefix.
@@ -97,6 +99,112 @@ enclosing_prefix() {
 		[ "$d" = "/" ] && return 1
 		d="$(dirname "$d")"
 	done
+}
+
+# --------------------------- steam / proton ---------------------------------
+# Steam installs keep the game outside the prefix:
+#   game   = <library>/steamapps/common/Fallout New Vegas
+#   prefix = <library>/steamapps/compatdata/22380/pfx
+# so neither enclosing_prefix nor find_game_dirs (both drive_c based) see them.
+STEAM_APPID=22380
+STEAM_GAME_REL="steamapps/common/Fallout New Vegas"
+
+steam_roots() {
+	local r home="${HOME%/}" xdg="${XDG_DATA_HOME:-$HOME/.local/share}"
+	xdg="${xdg%/}" # avoid //Steam when XDG_DATA_HOME has a trailing slash
+	for r in \
+		"$home/.steam/steam" \
+		"$home/.steam/root" \
+		"$home/.local/share/Steam" \
+		"$xdg/Steam" \
+		"$home/.var/app/com.valvesoftware.Steam/data/Steam" \
+		"$home/.var/app/com.valvesoftware.Steam/.local/share/Steam" \
+		"$home/snap/steam/common/.local/share/Steam" \
+		"$home/snap/steam/common/.steam/steam"; do
+		[ -d "$r/steamapps" ] && printf '%s\n' "$r"
+	done
+}
+
+# Every steamapps directory, including extra libraries in libraryfolders.vdf.
+steam_libraries() {
+	local root vdf lib
+	{
+		while IFS= read -r root; do
+			root="${root%/}" # a trailing slash would defeat dedup below
+			printf '%s/steamapps\n' "$root"
+			vdf="$root/steamapps/libraryfolders.vdf"
+			[ -f "$vdf" ] || continue
+			# VDF keys are case-insensitive; accept "path"/"Path"/etc.
+			while IFS= read -r lib; do
+				lib="${lib//\\\\//}" # VDF escapes backslashes
+				lib="${lib%/}"       # strip trailing slash, consistent dedup
+				[ -d "$lib/steamapps" ] && printf '%s/steamapps\n' "$lib"
+			done < <(sed -n 's/^[[:space:]]*"[pP][aA][tT][hH]"[[:space:]]*"\([^"]*\)".*$/\1/p' "$vdf")
+		done < <(steam_roots | sort -u)
+	} | awk '!seen[$0]++'
+}
+
+# Warn that Steam has the game but Proton hasn't created the prefix yet (the
+# prefix is only generated on the game's first launch).
+steam_prefix_missing() {
+	warn "Found Steam install at '$1', but no Proton prefix exists yet."
+	warn "Launch the game once through Steam to create it, then re-run this script."
+}
+
+# Proton prefix for the game.  The prefix comes from the same library that holds
+# the game, so the two are never paired across libraries.
+steam_prefix() {
+	local lib game
+	if [ -n "${1:-}" ]; then
+		case "$1" in
+		*/"$STEAM_GAME_REL")
+			game="$1"
+			lib="${game%/$STEAM_GAME_REL}"
+			if [ -d "$lib/steamapps/compatdata/$STEAM_APPID/pfx" ]; then
+				printf '%s\n' "$lib/steamapps/compatdata/$STEAM_APPID/pfx"
+				return 0
+			fi
+			steam_prefix_missing "$game"
+			return 1
+			;;
+		esac
+	fi
+	game="$(steam_game_dir)" || return 1
+	lib="${game%/$STEAM_GAME_REL}"
+	if [ -d "$lib/steamapps/compatdata/$STEAM_APPID/pfx" ]; then
+		printf '%s\n' "$lib/steamapps/compatdata/$STEAM_APPID/pfx"
+		return 0
+	fi
+	steam_prefix_missing "$game"
+	return 1
+}
+
+# Fallout New Vegas installed through Steam, if any.
+steam_game_dir() {
+	local lib
+	while IFS= read -r lib; do
+		if is_game_dir "$lib/common/Fallout New Vegas"; then
+			printf '%s\n' "$lib/common/Fallout New Vegas"
+			return 0
+		fi
+	done < <(steam_libraries)
+	return 1
+}
+
+# True if the path is a Fallout: New Vegas Proton prefix.
+is_steam_prefix() {
+	case "$(realpath "${1:-}" 2>/dev/null || printf '%s' "${1:-}")" in
+	*/steamapps/compatdata/"$STEAM_APPID"/pfx) return 0 ;;
+	esac
+	return 1
+}
+
+# True if the path is a Steam install of Fallout: New Vegas.
+is_steam_game_dir() {
+	case "${1:-}" in
+	*/"$STEAM_GAME_REL") return 0 ;;
+	esac
+	return 1
 }
 
 # True if the exe has IMAGE_FILE_LARGE_ADDRESS_AWARE (0x20) set in its PE header.
@@ -240,11 +348,28 @@ stage_7z() { # path-to-7z.exe
 	printf '%s' "$dst/7z.exe"
 }
 
+# protontricks (native or Flatpak) is the safe way to run winetricks verbs
+# against a Proton prefix; plain winetricks would use system Wine on it.
+have_protontricks() {
+	have protontricks ||
+		{ have flatpak && flatpak info com.github.Matoking.protontricks >/dev/null 2>&1; }
+}
+run_protontricks() {
+	if have protontricks; then
+		env -u WINEPREFIX protontricks "$@"
+	else
+		env -u WINEPREFIX flatpak run com.github.Matoking.protontricks "$@"
+	fi
+}
+
 # --------------------------- resolve wine prefix ----------------------------
-# Precedence: --prefix > $WINEPREFIX > enclosing prefix > prompt.
+# Precedence: --prefix > $WINEPREFIX > enclosing prefix > Steam prefix > prompt.
 if [ -z "$WINEPREFIX" ]; then
 	if WINEPREFIX="$(enclosing_prefix)"; then
 		printf "${c_info}Detected Wine prefix:${c_reset} %s\n" "$WINEPREFIX" >&2
+	elif { [ -z "$GAMEDIR" ] || is_steam_game_dir "$GAMEDIR"; } &&
+		WINEPREFIX="$(steam_prefix "$GAMEDIR")"; then
+		printf "${c_info}Detected Steam/Proton prefix:${c_reset} %s\n" "$WINEPREFIX" >&2
 	elif [ -t 0 ] && [ -t 2 ]; then
 		while :; do
 			printf '%b' "${c_info}Wine prefix not set.${c_reset} Enter the path to your Wine prefix: " >&2
@@ -266,9 +391,18 @@ if [ -z "$WINEPREFIX" ]; then
 fi
 export WINEPREFIX
 
+# Whether the selected prefix is the game's own Proton prefix decides if the
+# Steam game folder may be used: never pair a Steam game with a non-Steam prefix.
+if is_steam_prefix "$WINEPREFIX"; then
+	PREFIX_IS_STEAM=1
+else
+	PREFIX_IS_STEAM=0
+fi
+
 # --------------------------- resolve game dir -------------------------------
 # Precedence: --game-dir > an install found inside the selected prefix >
-# the current directory > interactive prompt.
+# the current directory > a Steam install (only when the prefix is that game's
+# Proton prefix) > interactive prompt.
 find_game_dirs() {
 	find "$WINEPREFIX/drive_c" -maxdepth 8 \
 		\( -ipath '*/ModOrganizer' -o -iname 'Data' \) -prune -o \
@@ -284,9 +418,13 @@ if ! is_game_dir "$GAMEDIR"; then
 	if [ "${#candidates[@]}" -eq 1 ]; then
 		GAMEDIR="${candidates[0]}"
 	elif [ "${#candidates[@]}" -eq 0 ]; then
-		# Nothing in the prefix: try the current directory, else ask.
+		# Nothing in the prefix: try the current directory, then a Steam install
+		# (only when the prefix actually is that game's Proton prefix).
 		if is_game_dir "$PWD"; then
 			GAMEDIR="$PWD"
+		elif [ "$PREFIX_IS_STEAM" = 1 ] && steam_game="$(steam_game_dir)"; then
+			GAMEDIR="$steam_game"
+			printf "${c_info}Detected Steam install:${c_reset} %s\n" "$GAMEDIR" >&2
 		elif [ -t 0 ] && [ -t 2 ]; then
 			while :; do
 				printf '%b' "${c_info}No FalloutNV.exe found in '$WINEPREFIX'.${c_reset} Enter the path to your 'Fallout New Vegas' folder: " >&2
@@ -338,6 +476,26 @@ if ! is_game_dir "$GAMEDIR"; then
 	fi
 fi
 
+# A Steam game folder only works with its Proton prefix (and vice versa); warn
+# if an explicit choice or two installs produced a mismatched pair. Auto-detect
+# already picks a single library that holds both (see steam_prefix).
+if is_steam_game_dir "$GAMEDIR" && [ "$PREFIX_IS_STEAM" = 0 ]; then
+	warn "'$GAMEDIR' looks like a Steam install, but '$WINEPREFIX'"
+	warn "is not its Proton prefix (expected .../compatdata/$STEAM_APPID/pfx)."
+	warn "Pass matching --game-dir/--prefix if this is not what you want."
+elif [ "$PREFIX_IS_STEAM" = 1 ] && ! is_steam_game_dir "$GAMEDIR"; then
+	warn "'$WINEPREFIX' is a Steam/Proton prefix, but '$GAMEDIR'"
+	warn "is not a Steam install. Pass matching --game-dir/--prefix if this is wrong."
+elif [ "$PREFIX_IS_STEAM" = 1 ] && is_steam_game_dir "$GAMEDIR"; then
+	game_lib="$(realpath "${GAMEDIR%/$STEAM_GAME_REL}")"
+	prefix_lib="$(realpath "$WINEPREFIX")"
+	prefix_lib="${prefix_lib%/steamapps/compatdata/$STEAM_APPID/pfx}"
+	if [ "$game_lib" != "$prefix_lib" ]; then
+		warn "'$GAMEDIR' and '$WINEPREFIX' come from different Steam libraries."
+		warn "Pass matching --game-dir/--prefix if this is not what you want."
+	fi
+fi
+
 # ------------------------------- preflight ----------------------------------
 step "Checking requirements"
 have base64 || die "base64 not found (install coreutils)."
@@ -372,12 +530,16 @@ fi
 # --------------------------- 1. 7-Zip (extractor) ---------------------------
 step "Ensuring 7-Zip is installed in the prefix"
 SEVENZIP="$(find_7z || true)"
+if [ -z "$SEVENZIP" ] && [ "$PREFIX_IS_STEAM" = 1 ] && have_protontricks; then
+	run_protontricks "$STEAM_APPID" -q 7zip || true
+	SEVENZIP="$(wait_for_7z 20 || true)"
+fi
 if [ -z "$SEVENZIP" ] && have winetricks; then
 	WINEPREFIX="$WINEPREFIX" winetricks -q 7zip || true
 	SEVENZIP="$(wait_for_7z 20 || true)"
 fi
 if [ -z "$SEVENZIP" ]; then
-	warn "winetricks unavailable/failed; downloading the 7-Zip installer"
+	warn "protontricks/winetricks unavailable or failed; downloading the 7-Zip installer"
 	page="$(fetch "https://www.7-zip.org/download.html")"
 	ver="$(printf '%s' "$page" | grep -oE '7z[0-9]+-x64\.exe' | sed 's/7z//; s/-x64.exe//' | sort -n | tail -1)"
 	[ -n "$ver" ] || ver="2603"
