@@ -284,13 +284,30 @@ backup_file() { # src sub [relpath]
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
-# Find the wine binary (some distros only ship wine64).
+# Find the wine binary (some distros only ship wine64).  It isn't required up
+# front: a Steam/Proton install can be driven through protontricks instead, so
+# we only bail out below once we know the prefix isn't a Proton one.
 if have wine; then
 	WINE=wine
 elif have wine64; then
 	WINE=wine64
-else die "wine not found in PATH."; fi
-w_run() { WINEPREFIX="$WINEPREFIX" "$WINE" "$@"; }
+else
+	WINE=""
+fi
+
+# Run a command inside the prefix.  Prefer system wine; fall back to
+# protontricks (which provides Proton's own wine) so Steam-only setups work.
+w_run() {
+	if [ -n "$WINE" ]; then
+		WINEPREFIX="$WINEPREFIX" "$WINE" "$@"
+		return
+	fi
+	local a cmd="wine"
+	for a in "$@"; do
+		cmd+=" $(printf '%q' "$a")"
+	done
+	run_protontricks -c "$cmd" "$STEAM_APPID"
+}
 
 # host path -> Z:\... (Z: maps to / in Wine)
 to_win() {
@@ -437,6 +454,12 @@ if is_steam_prefix "$WINEPREFIX"; then
 	PREFIX_IS_STEAM=1
 else
 	PREFIX_IS_STEAM=0
+fi
+
+# Without system wine the only way to touch the prefix is protontricks, and
+# that requires the prefix to be the game's own Proton prefix.
+if [ -z "$WINE" ] && ! { [ "$PREFIX_IS_STEAM" = 1 ] && have_protontricks; }; then
+	die "wine not found in PATH, and no protontricks for a Steam/Proton prefix."
 fi
 
 # --------------------------- resolve game dir -------------------------------
