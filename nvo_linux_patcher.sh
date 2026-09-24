@@ -87,6 +87,49 @@ die() {
 }
 have() { command -v "$1" >/dev/null 2>&1; }
 is_game_dir() { [ -n "${1:-}" ] && [ -f "$1/FalloutNV.exe" ]; }
+is_wine_prefix() { [ -f "${1:-}/system.reg" ]; }
+
+# Prompt for a path until <validator> accepts it
+prompt_path() { # prompt validator failure-reason
+	local reply
+	while :; do
+		printf '%b' "$1" >&2
+		IFS= read -r reply || return 1
+		case "$reply" in "~" | "~/"*) reply="$HOME${reply#\~}" ;; esac
+		if [ -z "$reply" ]; then
+			warn "A path is required."
+		elif "$2" "$reply"; then
+			printf '%s\n' "$reply"
+			return 0
+		else
+			warn "'$reply' $3"
+		fi
+	done
+}
+
+# Numbered menu; prints the chosen element on stdout (non-zero on EOF).
+choose_item() { # prompt item...
+	local prompt="$1" n reply i
+	shift
+	n=$#
+	[ "$n" -gt 0 ] || return 1
+	i=0
+	for reply in "$@"; do
+		i=$((i + 1))
+		printf '  %2d) %s\n' "$i" "$reply" >&2
+	done
+	while :; do
+		printf '%b' "$prompt" >&2
+		IFS= read -r reply || return 1
+		if [[ "$reply" =~ ^[0-9]+$ ]] && [ "$reply" -ge 1 ] && [ "$reply" -le "$n" ]; then
+			shift "$((reply - 1))"
+			printf '%s\n' "$1"
+			return 0
+		fi
+		warn "Enter a number between 1 and $n."
+	done
+}
+
 # Wine prefix enclosing the current directory: walk up only, never down.
 enclosing_prefix() {
 	local d
@@ -371,20 +414,10 @@ if [ -z "$WINEPREFIX" ]; then
 		WINEPREFIX="$(steam_prefix "$GAMEDIR")"; then
 		printf "${c_info}Detected Steam/Proton prefix:${c_reset} %s\n" "$WINEPREFIX" >&2
 	elif [ -t 0 ] && [ -t 2 ]; then
-		while :; do
-			printf '%b' "${c_info}Wine prefix not set.${c_reset} Enter the path to your Wine prefix: " >&2
-			IFS= read -r reply || die "Aborted."
-			[ -n "$reply" ] || {
-				warn "A prefix path is required."
-				continue
-			}
-			case "$reply" in "~" | "~/*") reply="$HOME${reply#\~}" ;; esac
-			if [ -f "$reply/system.reg" ]; then
-				WINEPREFIX="$reply"
-				break
-			fi
-			warn "'$reply' does not look like a Wine prefix (no system.reg)."
-		done
+		WINEPREFIX="$(prompt_path \
+			"${c_info}Wine prefix not set.${c_reset} Enter the path to your Wine prefix: " \
+			is_wine_prefix "does not look like a Wine prefix (no system.reg).")" ||
+			die "Aborted."
 	else
 		die "No WINEPREFIX set and stdin is not a terminal. Set WINEPREFIX or use --prefix."
 	fi
@@ -426,20 +459,10 @@ if ! is_game_dir "$GAMEDIR"; then
 			GAMEDIR="$steam_game"
 			printf "${c_info}Detected Steam install:${c_reset} %s\n" "$GAMEDIR" >&2
 		elif [ -t 0 ] && [ -t 2 ]; then
-			while :; do
-				printf '%b' "${c_info}No FalloutNV.exe found in '$WINEPREFIX'.${c_reset} Enter the path to your 'Fallout New Vegas' folder: " >&2
-				IFS= read -r reply || die "Aborted."
-				[ -n "$reply" ] || {
-					warn "A path is required."
-					continue
-				}
-				case "$reply" in "~" | "~/*") reply="$HOME${reply#\~}" ;; esac
-				if is_game_dir "$reply"; then
-					GAMEDIR="$reply"
-					break
-				fi
-				warn "'$reply' does not contain FalloutNV.exe."
-			done
+			GAMEDIR="$(prompt_path \
+				"${c_info}No FalloutNV.exe found in '$WINEPREFIX'.${c_reset} Enter the path to your 'Fallout New Vegas' folder: " \
+				is_game_dir "does not contain FalloutNV.exe.")" ||
+				die "Aborted."
 		else
 			die "No FalloutNV.exe found in '$WINEPREFIX' and stdin is not a terminal."
 		fi
@@ -454,21 +477,8 @@ if ! is_game_dir "$GAMEDIR"; then
 		if ! is_game_dir "$GAMEDIR"; then
 			if [ -t 0 ] && [ -t 2 ]; then
 				printf '%b' "${c_info}Several Fallout New Vegas installs found in the prefix:${c_reset}\n" >&2
-				i=0
-				for d in "${candidates[@]}"; do
-					i=$((i + 1))
-					printf '  %2d) %s\n' "$i" "$d" >&2
-				done
-				while :; do
-					printf '%b' "Choose a game folder [1-${#candidates[@]}]: " >&2
-					IFS= read -r reply || die "Aborted."
-					if [[ "$reply" =~ ^[0-9]+$ ]] &&
-						[ "$reply" -ge 1 ] && [ "$reply" -le "${#candidates[@]}" ]; then
-						GAMEDIR="${candidates[$((reply - 1))]}"
-						break
-					fi
-					warn "Enter a number between 1 and ${#candidates[@]}."
-				done
+				GAMEDIR="$(choose_item "Choose a game folder [1-${#candidates[@]}]: " "${candidates[@]}")" ||
+					die "Aborted."
 			else
 				die "Several FalloutNV.exe found in '$WINEPREFIX'; pass --game-dir to choose."
 			fi
