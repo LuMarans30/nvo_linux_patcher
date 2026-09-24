@@ -72,6 +72,11 @@ while [ $# -gt 0 ]; do
 	shift
 done
 
+# Shell tab-completion appends a trailing slash to directories; strip it so the
+# exact path matches used for Steam detection keep working.
+GAMEDIR="${GAMEDIR%/}"
+WINEPREFIX="${WINEPREFIX%/}"
+
 # ------------------------------- helpers ------------------------------------
 c_reset='\033[0m'
 c_ok='\033[1;32m'
@@ -96,6 +101,8 @@ prompt_path() { # prompt validator failure-reason
 		printf '%b' "$1" >&2
 		IFS= read -r reply || return 1
 		case "$reply" in "~" | "~/"*) reply="$HOME${reply#\~}" ;; esac
+		# Drop a trailing slash from tab-completion (but keep the root "/").
+		case "$reply" in */?/) reply="${reply%/}" ;; esac
 		if [ -z "$reply" ]; then
 			warn "A path is required."
 		elif "$2" "$reply"; then
