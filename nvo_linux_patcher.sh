@@ -728,11 +728,21 @@ ok 'AppDefaults\{FalloutNV.exe,nvse_loader.exe}  dsound = native,builtin'
 	ok "$backed_up file(s) backed up under $BACKUP"
 echo
 printf "${c_ok}All set!${c_reset}\n\n"
-cat <<EOF
-Next steps:
-  1. Launch the game through the launcher, e.g.:
 
-       WINEPREFIX="$WINEPREFIX" wine "$GAMEDIR/NVOLauncher2.exe"
+# A Steam/Proton install must be launched with Proton rather than system wine,
+# so tailor the launch hint to how this setup can actually run the launcher.
+printf 'Next steps:\n'
+printf '  1. Launch the game through the launcher, e.g.:\n\n'
+if [ "$PREFIX_IS_STEAM" = 1 ] && have_protontricks; then
+	printf '       protontricks-launch --appid %s "%s"\n' \
+		"$STEAM_APPID" "$GAMEDIR/NVOLauncher2.exe"
+	printf '     (or add NVOLauncher2.exe as a non-Steam game and launch it with the same\n'
+	printf '      Proton version as Fallout: New Vegas)\n'
+else
+	printf '       WINEPREFIX="%s" %s "%s"\n' \
+		"$WINEPREFIX" "$WINE" "$GAMEDIR/NVOLauncher2.exe"
+fi
+cat <<EOF
 
   2. In the launcher: log in (Discord/Steam) and press Join.
 
